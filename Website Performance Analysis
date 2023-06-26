@@ -1,0 +1,238 @@
+/*Date- June 09, 2012 
+Pull the most viewed website pages, ranked by session volume
+ */
+ 
+SELECT 
+		pageview_url,
+        COUNT(website_pageview_id)
+FROM website_pageviews
+WHERE created_at < "2012-06-09"
+GROUP BY 1
+ORDER BY 2 DESC;
+
+/*Date- June 12,2012 
+Would you be able to pull a list of top entry pages? */
+
+-- we create a temporary table that has pageviewID of the session where the user landed on website
+CREATE TEMPORARY TABLE EntryID
+SELECT 
+		website_session_id,
+        MIN(website_pageview_id) as EntryID
+FROM website_pageviews
+WHERE created_at < "2012-06-12"
+GROUP BY 1;
+
+-- we then find number or sessions landing on each landing page by grouping on pageview_url
+
+SELECT 
+		website_pageviews.pageview_url as PageURL,
+        COUNT(EntryID.EntryID) as Number_of_entries
+from EntryID
+LEFT JOIN website_pageviews
+		ON EntryID.EntryID=website_pageviews.website_pageview_id
+GROUP BY 1;
+
+/* Date - June 14, 2012
+Can you pull bounce rates for traffic landing on the homepage? */
+
+
+CREATE TEMPORARY TABLE demolanding   -- this will create a table that has landing session for each sessionid
+SELECT 
+		website_pageviews.website_session_id as sessionID,
+        min(website_pageviews.website_pageview_id) as LandingSession
+FROM website_pageviews
+WHERE website_pageviews.created_at<"2012-06-14"
+GROUP BY 1;
+
+
+CREATE TEMPORARY TABLE landingpage   -- this will give us url for each landing session
+SELECT
+		demolanding.sessionID,
+        demolanding.LandingSession,
+        website_pageviews.pageview_url
+FROM demolanding
+LEFT JOIN website_pageviews
+	ON demolanding.landingsession = website_pageviews.website_pageview_id;
+    
+ CREATE TEMPORARY TABLE pageviews -- this will give us total page views per session and we want only those who have 1 page views to calculate those who left from first page they saw
+ SELECT 
+		website_pageviews.website_session_id as sessionID,
+        count(website_pageviews.website_pageview_id) as TotalPageViews
+FROM website_pageviews
+WHERE website_pageviews.created_at<"2012-06-14"
+GROUP BY 1
+HAVING count(website_pageviews.website_pageview_id)=1;
+
+-- now we have landing page for each session and sessions with just one page view. we need to merge landingpage and pageviews to find those who have one page view
+
+SELECT 
+		landingpage.pageview_url as landingpage,
+        count(landingpage.sessionID) as totalsessions,
+        count(pageviews.TotalPageViews) as totalbounce,
+        count(pageviews.TotalPageViews)/count(landingpage.sessionID) as bouce_rate
+FROM landingpage
+LEFT JOIN pageviews
+	ON landingpage.sessionID=pageviews.sessionID
+GROUP BY 1;
+
+/* Based on your bounce rate analysis we ran a new custom landing page (/lander-1) in a 50-50 test against the homepage for our gsearch and nonbrand traffic
+Can you pull bounce rates for the two groups so we can evaluate the new page? make sure to look at the time period where /lander-1 was getting traffic so that it is
+a fair comparision */
+
+-- first we find when was the /lander-1 launched and what was the pageview id for the first time it was used.
+SELECT 
+		min(website_pageviews.created_at) as firstused,
+        min(website_pageviews.website_pageview_id) as first_pageview_id
+FROM website_pageviews
+WHERE website_pageviews.pageview_url='/lander-1';
+
+-- created at 2012-06-19 00:35:54
+-- website page view id = 23504
+
+-- then we find out landing pages for all sessions between the given conditions
+
+CREATE TEMPORARY TABLE landing
+SELECT 
+		website_pageviews.website_session_id as sessionID,
+        min(website_pageviews.website_pageview_id) as landingID
+FROM website_pageviews
+LEFT JOIN website_sessions
+	ON website_pageviews.website_session_id=website_sessions.website_session_id
+WHERE website_pageviews.created_at < '2012-07-28'
+		AND website_pageviews.website_pageview_id>23504
+        AND website_sessions.utm_source='gsearch'
+        AND website_sessions.utm_campaign='nonbrand'
+GROUP BY 1;
+
+
+-- then we find landingpageurl for the sessions
+CREATE TEMPORARY TABLE landingurl
+SELECT 
+		landing.sessionID,
+		landing.landingID,
+        website_pageviews.pageview_url
+FROM landing
+left join website_pageviews
+	on landing.landingID=website_pageviews.website_pageview_id;
+
+-- then we find total number of page views per sessions and fiter out those equals to 1
+CREATE TEMPORARY TABLE numberofsessions    
+SELECT 
+		website_pageviews.website_session_id as sessionID,
+        count(website_pageviews.website_pageview_id) as numberofsessions
+FROM website_pageviews
+LEFT JOIN website_sessions
+	ON website_pageviews.website_session_id=website_sessions.website_session_id
+WHERE website_pageviews.created_at < '2012-07-28'
+		AND website_pageviews.website_pageview_id>23504
+        AND website_sessions.utm_source='gsearch'
+        AND website_sessions.utm_campaign='nonbrand'
+GROUP BY 1
+HAVING count(website_pageviews.website_pageview_id)=1;
+
+-- then we create a final table that has all the information we need
+CREATE TEMPORARY TABLE finalbounce
+SELECT 
+		landingurl.sessionID as sessionID,
+        landingurl.landingID as landingID,
+        landingurl.pageview_url as URL,
+        numberofsessions.numberofsessions
+FROM landingurl
+LEFT JOIN numberofsessions
+	ON landingurl.sessionID = numberofsessions.sessionID;
+    
+-- then finally we find the bounce rate for each landing page    
+SELECT 
+		url,
+        count(sessionID) as numberofsessions,
+        count(numberofsessions) as bounce_sessions,
+        count(numberofsessions) / count(sessionID) as bounce_rate
+FROM finalbounce
+GROUP BY 1;
+
+/* Date- August 31, 2012
+ Could you pull the volume of paid search non brand traffic landing on /home and /lander1, trended weekly since June 1st?
+ Could you also pull overall paid search bounce rate trended weekly? */
+ 
+ -- Finding pageviewid for the landing page of each session as per conditions
+
+CREATE TEMPORARY TABLE sID_lID_bouncesessions
+SELECT 
+	website_sessions.website_session_id as sessionID,
+	MIN(website_pageviews.website_pageview_id) as landingID,
+    case when count(website_pageviews.website_pageview_id)=1 then 1 else null end as bounce_sessoin
+FROM website_sessions
+LEFT JOIN website_pageviews
+	ON website_sessions.website_session_id= website_pageviews.website_session_id
+WHERE website_sessions.utm_campaign='nonbrand'
+	AND website_sessions.utm_source='gsearch'
+    AND website_sessions.created_at > '2012-06-01'
+    AND website_sessions.created_at < '2012-08-31'
+GROUP BY 
+	website_sessions.website_session_id;
+
+-- Finding url of the page where the session landed
+
+CREATE TEMPORARY TABLE url_added
+SELECT 
+	sID_lID_bouncesessions.sessionID,
+    sID_lID_bouncesessions.landingID,
+    sID_lID_bouncesessions.bounce_sessoin as bounce_session,
+    website_pageviews.pageview_url
+FROM sID_lID_bouncesessions
+LEFT JOIN website_pageviews
+	ON sID_lID_bouncesessions.landingID = website_pageviews.website_pageview_id;
+
+-- creating a temporary table the stored date for startofweek
+    
+CREATE TEMPORARY TABLE startofweek
+SELECT 
+	 week(website_sessions.created_at) as weeknumber,
+     min(website_sessions.created_at) as StartDate
+FROM website_sessions
+LEFT JOIN website_pageviews
+	ON website_sessions.website_session_id= website_pageviews.website_session_id
+WHERE website_sessions.utm_campaign='nonbrand'
+	AND website_sessions.utm_source='gsearch'
+    AND website_sessions.created_at > '2012-06-01'
+    AND website_sessions.created_at < '2012-08-31'
+GROUP BY week(website_sessions.created_at);
+
+-- adding week number for each landing session so it can be merged with above table to get dates in final table
+
+CREATE TEMPORARY TABLE week_added
+SELECT 
+		url_added.sessionID,
+        url_added.landingID,
+        url_added.bounce_session,
+        url_added.pageview_url,
+        week(website_sessions.created_at) weeknumber
+FROM url_added
+INNER JOIN website_sessions
+	ON url_added.sessionID = website_sessions.website_session_id;
+ 
+ -- making the final table which has all the information we need so that we can finally generate the insight we need
+ 
+CREATE TEMPORARY TABLE Final
+SELECT 
+		week_added.sessionID,
+        week_added.landingID,
+        week_added.bounce_session,
+        week_added.pageview_url,
+        week_added.weeknumber,
+        startofweek.StartDate
+FROM week_added
+LEFT JOIN startofweek
+	ON week_added.weeknumber= startofweek.weeknumber;
+    
+-- generating the insight we need from the final table we created    
+
+SELECT 
+	date(final.StartDate) as StartDate,
+    count(final.bounce_session)/count(final.sessionID) as Bounce_rate,
+    count(final.sessionID) as total_landings,
+    count(case when final.pageview_url = '/home' then final.sessionID else null end) as home_sessions,
+    count(case when final.pageview_url = '/lander-1' then final.sessionID else null end) as lander_sessions
+FROM final
+GROUP BY 
+	date(final.StartDate);
