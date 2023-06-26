@@ -1,0 +1,153 @@
+/*
+Date- September 05,2012
+I'd like to understand where we are loosing our gsearch visitors between lander-1 and placing order.
+Can you build a full conversion funnel, analysing how many customers make it to each step?
+Start with lander-1 and buid the funnel all the way to our thank you page.
+Please use data since August 5th 
+*/
+
+
+-- we find all the sessions landing in lander-1
+
+CREATE TEMPORARY TABLE lander_sessions
+SELECT 
+	website_sessions.website_session_id
+FROM website_sessions
+LEFT JOIN website_pageviews
+	ON website_sessions.website_session_id = website_pageviews.website_session_id
+WHERE website_sessions.utm_source='gsearch'
+	AND website_sessions.created_at > '2012-08-05'
+    AND website_sessions.created_at < '2012-09-05'
+    AND website_pageviews.pageview_url='/lander-1';
+    
+-- we create a table with flags for each page a session from landingpage to placing an order
+
+CREATE TEMPORARY TABLE flags
+SELECT 
+	website_sessions.website_session_id as sessionID,
+    website_pageviews.pageview_url,
+    case when website_pageviews.pageview_url = '/products' then 1 else 0 end as reached_products,
+    case when website_pageviews.pageview_url = '/the-original-mr-fuzzy' then 1 else 0 end as reached_mr_fuzzy,
+    case when website_pageviews.pageview_url = '/cart' then 1 else 0 end as reached_cart,
+    case when website_pageviews.pageview_url = '/shipping' then 1 else 0 end as reached_shipping,
+    case when website_pageviews.pageview_url = '/billing' then 1 else 0 end as reached_billing,
+    case when website_pageviews.pageview_url = '/thank-you-for-your-order' then 1 else 0 end as placed_order
+FROM website_sessions
+LEFT JOIN website_pageviews
+	ON website_sessions.website_session_id = website_pageviews.website_session_id
+WHERE website_sessions.utm_source='gsearch'
+	AND website_sessions.created_at > '2012-08-05'
+    AND website_sessions.created_at < '2012-09-05'
+    AND website_pageviews.pageview_url in ('/lander-1','/products','/the-original-mr-fuzzy','/cart','/shipping','/billing','/thank-you-for-your-order')
+    
+ORDER BY website_sessions.website_session_id;
+
+-- now we find till where each sessions reached but we also filter out sessions that landed on lander-1 using inner join
+-- because for this analysis we want to go from /lander1 to thankyou page
+
+CREATE TEMPORARY TABLE max_page_reached
+SELECT
+		lander_sessions.website_session_id as sessionID,
+        MAX(reached_products) as reached_products,
+        MAX(reached_mr_fuzzy) as reached_mr_fuzzy,
+        MAX(reached_cart) as reached_cart,
+        MAX(reached_shipping) as reached_shipping,
+        MAX(reached_billing) as reached_billing,
+        MAX(placed_order) as placed_order
+FROM flags
+INNER JOIN lander_sessions
+	ON flags.sessionID = lander_sessions.website_session_id
+GROUP BY sessionID;
+
+-- now we find total sessions landing on each page
+-- this will show a number funnel or customer going from lander-1 to placing order
+
+SELECT 
+        COUNT(sessionID) as sessions,
+	    COUNT( case when reached_products = 1 then sessionID else null end) as reached_products,
+        COUNT( case when reached_mr_fuzzy = 1 then sessionID else null end) as reached_mr_fuzzy,
+        COUNT( case when reached_cart = 1 then sessionID else null end) as reached_cart,
+        COUNT( case when reached_shipping = 1 then sessionID else null end) as reached_shipping,
+        COUNT( case when reached_billing = 1 then sessionID else null end) as reached_billing,
+        COUNT( case when placed_order = 1 then sessionID else null end) as placed_order
+FROM max_page_reached;
+
+-- this will show click through rate for each page for better uderstanding
+
+SELECT 
+        COUNT( case when reached_products = 1 then sessionID else null end)/COUNT(sessionID) as lander_click_through_rt,
+        COUNT( case when reached_mr_fuzzy = 1 then sessionID else null end) / COUNT( case when reached_products = 1 then sessionID else null end) as products_click_through_rt,
+        COUNT( case when reached_cart = 1 then sessionID else null end) / COUNT( case when reached_mr_fuzzy = 1 then sessionID else null end) as fuzzy_click_through_rt,
+        COUNT( case when reached_shipping = 1 then sessionID else null end) / COUNT( case when reached_cart = 1 then sessionID else null end) as cart_click_through_rt,
+        COUNT( case when reached_billing = 1 then sessionID else null end) / COUNT( case when reached_shipping = 1 then sessionID else null end) as shipping_click_through_rt,
+        COUNT( case when placed_order = 1 then sessionID else null end) / COUNT( case when reached_billing = 1 then sessionID else null end) as billing_click_through_rt
+FROM max_page_reached;
+
+/*
+Date - November 10, 2012
+We tested an updated billing page based on your funnel analysis. Can you take a look and see whether /billing2 is doing better than orignal billing page?
+We would like to know what percentage of people reaching each billing page end up placing an order.
+Run this test for all our visitors 
+*/
+
+-- finding launch date for /billing-2
+
+SELECT 	
+	MIN(website_pageviews.website_pageview_id) as first_pv_id,
+    MIN(website_pageviews.created_at) as firstcreated
+FROM website_pageviews
+WHERE website_pageviews.pageview_url='/billing-2';
+
+-- pv-ID- 53550
+-- created- 2012-09-10
+
+CREATE TEMPORARY TABLE url
+SELECT 
+	website_pageviews.website_session_id as sessionID,
+    website_pageviews.pageview_url as URL,
+    CASE WHEN website_pageviews.pageview_url='/thank-you-for-your-order' then 1 else 0 end as placed_order
+FROM website_pageviews
+WHERE website_pageviews.website_pageview_id >= 53550
+	AND website_pageviews.created_at < '2012-11-10'
+    AND website_pageviews.pageview_url in ('/billing','/billing-2','/thank-you-for-your-order')
+ORDER BY
+	website_pageviews.website_session_id;
+
+-- list or sessionID with billing and billing2 as starting to later innerjoin
+
+CREATE TEMPORARY TABLE billing
+SELECT 
+	url.sessionID,
+    url.url
+FROM url
+WHERE url.url in ('/billing','/billing-2');
+
+-- this will make a table that will give sessions that finally placed order and sessions that did not
+
+CREATE TEMPORARY TABLE placed_order
+SELECT 
+	URL.sessionID,
+    max(url.placed_order) as placed_order
+FROM url
+GROUP BY url.sessionID;
+    
+-- now we finally join both table billing and placed_order
+
+CREATE TABLE url_order
+SELECT 
+		billing.sessionID,
+        billing.url,
+        placed_order.placed_order
+FROM billing
+INNER JOIN placed_order
+	ON billing.sessionID = placed_order.sessionID;
+    
+-- passing querry for final output analysis that we need
+
+SELECT
+	url,
+    count(sessionID) as sessions,
+    count(case when placed_order=1 then sessionID else null end) as orders,
+    count(case when placed_order=1 then sessionID else null end) / count(sessionID) as billing_to_order_rate
+FROM url_order
+GROUP BY url
