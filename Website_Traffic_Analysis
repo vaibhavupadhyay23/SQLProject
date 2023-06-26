@@ -1,0 +1,81 @@
+/*Situation 1- DATE- April 12, 2012
+We have been live for almost a month now anad we are starting to generate sales.
+Can you help me understand where the bulk of our website sessions are coming from, untill yesterday.*/
+
+SELECT
+		utm_source,
+        utm_campaign,
+        http_referer,
+        COUNT(DISTINCT website_session_id)
+FROM website_sessions
+WHERE created_at < '2012-04-12'
+GROUP BY 1,2,3
+ORDER BY 4 desc;
+
+/* Situation 2 DATE- April 14, 2012
+Sounds like gsearch nonbrand is our major  traffic source, but we need to understand if those sessions are driving sales
+Could you please calculate the CONVERSION RATE(CVR) from session to order?
+Based on what we are paying for clicks we'll need a CVR of atleast 4% to make the numbers work.
+If we are much lower we need to reduce bids. If we are higher, we can increase bids to drive more volume. */
+
+SELECT
+        COUNT(DISTINCT website_sessions.website_session_id) as sessions,
+        COUNT(DISTINCT orders.order_id) as orders,
+        COUNT(DISTINCT orders.order_id)/COUNT(DISTINCT website_sessions.website_session_id) as CVR
+FROM website_sessions
+LEFT JOIN orders
+ON website_sessions.website_session_id = orders.website_session_id
+WHERE website_sessions.created_at < '2012-04-14'
+		and website_sessions.utm_source="gsearch"
+        and website_sessions.utm_campaign="nonbrand";
+
+/* Situation 3: May 10 2012
+Based on your CVR analysis we bid down gsearch nonbrand on 2012-04-15.
+Can you pull gsearch nonbrand trended session volume, by week, to see if bid changes have caused volume to drop at all? */
+
+SELECT
+		MIN(Date(created_at)) as startofweek,
+        COUNT(DISTINCT website_session_id) as sessions
+FROM website_sessions
+WHERE utm_source='gsearch'
+	  AND utm_campaign='nonbrand'
+      AND created_at < "2012-05-12"
+GROUP BY YEAR(created_at),
+        WEEK(created_at);
+ 
+/*SITUATION 4- MAY 11 2012 
+I was trying to use our site on my mobile device the other day and the experience was not great.
+Could you pull CVR from sessions to orders by device type? 
+If desktop performance if better than on mobile we may be able to bid up for desktop specifically to get more volume */
+ 
+SELECT
+		website_sessions.device_type as Device_Type,
+        COUNT(DISTINCT orders.order_id) as orders,
+        COUNT(DISTINCT website_sessions.website_session_id) as Sessions,
+        COUNT(DISTINCT orders.order_id)/COUNT(DISTINCT website_sessions.website_session_id) as CVR
+FROM website_sessions 
+LEFT JOIN orders
+		ON website_sessions.website_session_id=orders.website_session_id
+WHERE website_sessions.utm_source='gsearch'
+	AND website_sessions.utm_campaign='nonbrand'
+    AND website_sessions.created_at<"2012-05-11"
+GROUP BY 1;
+
+/* SITUATION 5- June 09, 2012
+After your device level analysis of conversion rates we realised desktop was doing well, so we bid our gsearch nonbrand desktop campaigns up on 2012-05-19
+
+Could you pull weekly trands for both desktop and mobile so we can see the impact on volume"
+You can use 2012-04-15 untill the bid change as a baseline */
+
+SELECT
+        min(DATE(created_at)),
+        count(
+        case when device_type='desktop' then website_session_id else null end) as desktop_sessions,
+        count(
+        case when device_type='mobile' then website_session_id else null end) as mobile_sessions
+FROM website_sessions
+WHERE created_at BETWEEN '2012-04-15' AND '2012-06-09'
+	AND website_sessions.utm_source='gsearch'
+	AND website_sessions.utm_campaign='nonbrand'
+GROUP BY YEAR(created_at),
+        WEEK(created_at);
